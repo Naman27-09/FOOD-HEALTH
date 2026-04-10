@@ -1,0 +1,117 @@
+# .gitignore
+
+# -----------------------------
+
+# Python Cache & Compiled Files
+
+# -----------------------------
+
+**pycache**/
+*.py[cod]
+*$py.class
+
+# -----------------------------
+
+# Virtual Environment
+
+# -----------------------------
+
+venv/
+env/
+ENV/
+.venv/
+
+# -----------------------------
+
+# Environment Variables
+
+# -----------------------------
+
+.env
+.env.*
+
+# -----------------------------
+
+# Logs & Debug Files
+
+# -----------------------------
+
+*.log
+logs/
+
+# -----------------------------
+
+# Database Files
+
+# -----------------------------
+
+*.db
+*.sqlite3
+
+# -----------------------------
+
+# IDE & Editor Files
+
+# -----------------------------
+
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# -----------------------------
+
+# OS Files
+
+# -----------------------------
+
+.DS_Store
+Thumbs.db
+
+# -----------------------------
+
+# Node Modules (if using frontend)
+
+# -----------------------------
+
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# -----------------------------
+
+# Build & Dist Files
+
+# -----------------------------
+
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# -----------------------------
+
+# Jupyter Notebook Checkpoints
+
+# -----------------------------
+
+.ipynb_checkpoints/
+
+# -----------------------------
+
+# Coverage Reports
+
+# -----------------------------
+
+.coverage
+htmlcov/
+
+# -----------------------------
+
+# Temporary Files
+
+# -----------------------------
+
+*.tmp
+*.temp
