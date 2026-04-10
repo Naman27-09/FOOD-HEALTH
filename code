@@ -1,0 +1,128 @@
+import uvicorn
+from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
+from passlib.context import CryptContext
+from datetime import datetime
+
+import models, schemas, database, recommendation
+from database import engine
+
+models.Base.metadata.create_all(bind=engine)
+
+app = FastAPI(title="Antigravity Health App API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # Allow all for local dev
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# Dependency
+def get_db():
+    db = database.SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# Mocking auth token validation for simplicity in this MVP
+def get_current_user(db: Session = Depends(get_db)):
+    # In a real app we'd decode JWT here. For now, assume user ID 1 exists.
+    user = db.query(models.User).filter(models.User.id == 1).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return user
+
+@app.on_event("startup")
+def populate_db():
+    db = database.SessionLocal()
+    # Create test user if none exists
+    if not db.query(models.User).filter_by(id=1).first():
+        hashed_pw = pwd_context.hash("password")
+        user = models.User(id=1, email="test@antigravity.fake", hashed_password=hashed_pw, goal_type="lose", daily_cal_limit=2200)
+        db.add(user)
+        db.commit()
+
+    # Pre-populate GlobalFoods
+    if db.query(models.GlobalFood).count() == 0:
+        healthy = [
+            models.GlobalFood(name="Grilled Chicken Salad", calories=350, protein=35.0, carbs=10.0, fats=12.0, base_health_index=85.0),
+            models.GlobalFood(name="Salmon & Quinoa", calories=450, protein=30.0, carbs=40.0, fats=15.0, base_health_index=90.0),
+            models.GlobalFood(name="Greek Yogurt Bowl", calories=250, protein=20.0, carbs=15.0, fats=5.0, base_health_index=80.0),
+            models.GlobalFood(name="Protein Shake", calories=150, protein=25.0, carbs=5.0, fats=2.0, base_health_index=70.0),
+            models.GlobalFood(name="Cheeseburger", calories=800, protein=35.0, carbs=50.0, fats=45.0, base_health_index=15.0), # Low health index
+        ]
+        db.bulk_save_objects(healthy)
+        db.commit()
+    db.close()
+
+@app.post("/auth/login", response_model=schemas.UserResponse)
+def login(user: schemas.UserCreate, db: Session = Depends(get_db)):
+    db_user = db.query(models.User).filter(models.User.email == user.email).first()
+    if not db_user or not pwd_context.verify(user.password, db_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Incorrect email or password")
+    return db_user
+
+@app.get("/users/me", response_model=schemas.UserResponse)
+def read_users_me(current_user: models.User = Depends(get_current_user)):
+    return current_user
+
+@app.put("/users/me", response_model=schemas.UserResponse)
+def update_user_profile(profile: schemas.UserProfileUpdate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    for key, value in profile.dict(exclude_unset=True).items():
+        setattr(current_user, key, value)
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
+@app.post("/logs/", response_model=schemas.FoodLogResponse)
+def create_food_log(log: schemas.FoodLogCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    ag_score = recommendation.calculate_antigravity_score(log.calories, log.protein, log.carbs, log.fats)
+    db_log = models.FoodLog(**log.dict(), user_id=current_user.id, antigravity_score=ag_score)
+    db.add(db_log)
+    db.commit()
+    db.refresh(db_log)
+    return db_log
+
+@app.get("/logs/daily", response_model=list[schemas.FoodLogResponse])
+def get_daily_logs(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    today = datetime.utcnow().date()
+    logs = db.query(models.FoodLog).filter(
+        models.FoodLog.user_id == current_user.id,
+        models.FoodLog.timestamp >= datetime.combine(today, datetime.min.time())
+    ).all()
+    return logs
+
+@app.get("/recommendations", response_model=list[schemas.RecommendationResponse])
+def get_recommendations(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    today = datetime.utcnow().date()
+    recs = recommendation.get_recommendations_for_user(db, current_user, today)
+    return recs
+
+@app.get("/dashboard/stats")
+def get_dashboard_stats(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    today = datetime.utcnow().date()
+    logs = db.query(models.FoodLog).filter(
+        models.FoodLog.user_id == current_user.id,
+        models.FoodLog.timestamp >= datetime.combine(today, datetime.min.time())
+    ).all()
+    
+    total_cal = sum(l.calories for l in logs)
+    total_score = sum(l.antigravity_score for l in logs)
+    average_score = total_score / len(logs) if logs else 0
+    
+    return {
+        "total_calories": total_cal,
+        "daily_limit": current_user.daily_cal_limit,
+        "antigravity_meter": average_score, # e.g. 0-100 indicating how "lifted" they are
+        "logs_count": len(logs)
+    }
+
+if __name__ == "__main__":
+    uvicorn.run("app:app", host="127.0.0.1", port=8000, reload=True)
+    
